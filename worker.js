@@ -8,6 +8,10 @@ addEventListener("fetch", event => {
 });
 
 async function handleRequest(request) {
+    if (request.method === "OPTIONS") {
+        return handleOptions(request);
+    }
+
     const requestUrl = new URL(request.url);
     const path = requestUrl.pathname;
     if (path === "/tts") {
@@ -18,7 +22,7 @@ async function handleRequest(request) {
         const outputFormat = requestUrl.searchParams.get("o") || "audio-24khz-48kbitrate-mono-mp3";
         const download = requestUrl.searchParams.get("d") || false;
         const response = await getVoice(text, voiceName, rate, pitch, outputFormat, download);
-        return response;
+        return addCORSHeaders(response);
     }
 
     if (path === "/voices") {
@@ -47,20 +51,23 @@ async function handleRequest(request) {
             });
             return new Response(response.join("\n"), {
                 headers: {
-                    "Content-Type": "application/html; charset=utf-8"
+                    "Content-Type": "application/html; charset=utf-8",
+                    ...makeCORSHeaders()
                 }
             });
         } else if (f === "1") {
             const map = new Map(response.map(item => [item.ShortName, item.LocalName]));
             return new Response(JSON.stringify(Object.fromEntries(map)), {
                 headers: {
-                    "Content-Type": "application/json; charset=utf-8"
+                    "Content-Type": "application/json; charset=utf-8",
+                    ...makeCORSHeaders()
                 }
             });
         } else {
             return new Response(JSON.stringify(response), {
                 headers: {
-                    "Content-Type": "application/json; charset=utf-8"
+                    "Content-Type": "application/json; charset=utf-8",
+                    ...makeCORSHeaders()
                 }
             });
         }
@@ -72,9 +79,139 @@ async function handleRequest(request) {
   <li> /tts?t=[text]&v=[voice]&r=[rate]&p=[pitch]&o=[outputFormat] <a href="${baseUrl}/tts?t=hello, world&v=zh-CN-XiaoxiaoMultilingualNeural&r=0&p=0&o=audio-24khz-48kbitrate-mono-mp3">try</a> </li>
   <li> /voices?l=[locate, like zh|zh-CN]&f=[format, 0/1/empty 0(TTS-Server)|1(MultiTTS)] <a href="${baseUrl}/voices?l=zh&f=1">try</a> </li>
   </ol>
-  `, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  `, {
+        status: 200,
+        headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            ...makeCORSHeaders()
+        }
+    });
 }
 
+async function handleOptions(request) {
+    return new Response(null, {
+        status: 204,
+        headers: {
+            ...makeCORSHeaders(),
+            "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+            "Access-Control-Allow-Headers": request.headers.get("Access-Control-Request-Headers")
+        }
+    });
+}
+
+async function getVoice(text, voiceName = "zh-CN-XiaoxiaoMultilingualNeural", rate = 0, pitch = 0, outputFormat = "audio-24khz-48kbitrate-mono-mp3", download = false) {
+    if (!expiredAt || Date.now() / 1000 > expiredAt - 60) {
+        endpoint = await getEndpoint();
+        const jwt = endpoint.t.split(".")[1];
+        const decodedJwt = JSON.parse(atob(jwt));
+        expiredAt = decodedJwt.exp;
+        clientId = uuid();
+        console.log("getEndpoint, expiredAt:" + (expiredAt - Date.now() / 1000) / 60 + "m left");
+    } else {
+        console.log("expiredAt:" + (expiredAt - Date.now() / 1000) / 60 + "m left");
+    }
+
+    const url = `https://${endpoint.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
+    const headers = {
+        "Authorization": endpoint.t,
+        "Content-Type": "application/ssml+xml",
+        "User-Agent": "okhttp/4.5.0",
+        "X-Microsoft-OutputFormat": outputFormat
+    };
+
+    const ssml = getSsml(text, voiceName, rate, pitch);
+    const response = await fetch(url, {
+        method: "POST",
+        headers: headers,
+        body: ssml
+    });
+
+    if (response.ok) {
+        let newResponse = new Response(response.body, response);
+        if (download) {
+            newResponse.headers.set("Content-Disposition", `attachment; filename="${uuid()}.mp3"`);
+        }
+        return addCORSHeaders(newResponse);
+    } else {
+        return addCORSHeaders(new Response(response.statusText, { status: response.status }));
+    }
+}
+
+function getSsml(text, voiceName, rate, pitch) {
+    return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" version="1.0" xml:lang="zh-CN"> 
+                <voice name="${voiceName}"> 
+                    <mstts:express-as style="general" styledegree="1.0" role="default"> 
+                        <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${text}</prosody> 
+                    </mstts:express-as> 
+                </voice> 
+            </speak>`;
+}
+
+async function voiceList() {
+    const headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36 Edg/107.0.1418.26",
+        "X-Ms-Useragent": "SpeechStudio/2021.05.001",
+        "Content-Type": "application/json",
+        "Origin": "https://azure.microsoft.com",
+        "Referer": "https://azure.microsoft.com"
+    };
+    return fetch("https://eastus.api.speech.microsoft.com/cognitiveservices/voices/list", {
+        headers: headers,
+        cf: {
+            cacheTtl: 600,
+            cacheEverything: true,
+            cacheKey: "mstrans-voice-list"
+        }
+    }).then(res => res.json());
+}
+
+function addCORSHeaders(response) {
+    const newHeaders = new Headers(response.headers);
+    for (const [key, value] of Object.entries(makeCORSHeaders())) {
+        newHeaders.set(key, value);
+    }
+    return new Response(response.body, { ...response, headers: newHeaders });
+}
+
+function makeCORSHeaders() {
+    return {
+        "Access-Control-Allow-Origin": "*", // 可以将 "*" 替换为特定的来源，例如 "https://cb3568f1.text2voice.pages.dev"
+        "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "86400" // 允许OPTIONS请求预检缓存的时间
+    };
+}
+
+async function hmacSha256(key, data) {
+    const cryptoKey = await crypto.subtle.importKey(
+        "raw",
+        key,
+        { name: "HMAC", hash: { name: "SHA-256" } },
+        false,
+        ["sign"]
+    );
+    const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
+    return new Uint8Array(signature);
+}
+
+async function base64ToBytes(base64) {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+}
+
+async function bytesToBase64(bytes) {
+    return btoa(String.fromCharCode.apply(null, bytes));
+}
+
+function uuid() {
+    return crypto.randomUUID().replace(/-/g, "");
+}
+
+// 以下代码保持现状
 async function getEndpoint() {
     const endpointUrl = "https://dev.microsofttranslator.com/apps/endpoint?api-version=1.0";
     const headers = {
@@ -110,93 +247,4 @@ async function sign(urlStr) {
 function dateFormat() {
     const formattedDate = (new Date()).toUTCString().replace(/GMT/, "").trim() + " GMT";
     return formattedDate.toLowerCase();
-}
-
-async function getVoice(text, voiceName = "zh-CN-XiaoxiaoMultilingualNeural", rate = 0, pitch = 0, outputFormat = "audio-24khz-48kbitrate-mono-mp3", download = false) {
-    if (!expiredAt || Date.now() / 1000 > expiredAt - 60) {
-        endpoint = await getEndpoint();
-        const jwt = endpoint.t.split(".")[1];
-        const decodedJwt = JSON.parse(atob(jwt));
-        expiredAt = decodedJwt.exp;
-        clientId = uuid();
-        console.log("getEndpoint, expiredAt:" + (expiredAt - Date.now() / 1000) / 60 + "m left");
-    } else {
-        console.log("expiredAt:" + (expiredAt - Date.now() / 1000) / 60 + "m left");
-    }
-
-    const url = `https://${endpoint.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
-    const headers = {
-        "Authorization": endpoint.t,
-        "Content-Type": "application/ssml+xml",
-        "User-Agent": "okhttp/4.5.0",
-        "X-Microsoft-OutputFormat": outputFormat
-    };
-
-    const ssml = getSsml(text, voiceName, rate, pitch);
-    const response = await fetch(url, {
-        method: "POST",
-        headers: headers,
-        body: ssml
-    });
-    if (response.ok) {
-        if (!download) {
-            return response;
-        }
-        const resp = new Response(response.body, response);
-        resp.headers.set("Content-Disposition", `attachment; filename="${uuid()}.mp3"`);
-        return resp;
-    } else {
-        return new Response(response.statusText, { status: response.status });
-    }
-}
-
-function getSsml(text, voiceName, rate, pitch) {
-    return `<speak xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts" version="1.0" xml:lang="zh-CN"> <voice name="${voiceName}"> <mstts:express-as style="general" styledegree="1.0" role="default"> <prosody rate="${rate}%" pitch="${pitch}%" volume="50">${text}</prosody> </mstts:express-as> </voice> </speak>`;
-}
-
-async function voiceList() {
-    const headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36 Edg/107.0.1418.26",
-        "X-Ms-Useragent": "SpeechStudio/2021.05.001",
-        "Content-Type": "application/json",
-        "Origin": "https://azure.microsoft.com",
-        "Referer": "https://azure.microsoft.com"
-    };
-    return fetch("https://eastus.api.speech.microsoft.com/cognitiveservices/voices/list", {
-        headers: headers,
-        cf: {
-            cacheTtl: 600,
-            cacheEverything: true,
-            cacheKey: "mstrans-voice-list"
-        }
-    }).then(res => res.json());
-}
-
-async function hmacSha256(key, data) {
-    const cryptoKey = await crypto.subtle.importKey(
-        "raw",
-        key,
-        { name: "HMAC", hash: { name: "SHA-256" } },
-        false,
-        ["sign"]
-    );
-    const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
-    return new Uint8Array(signature);
-}
-
-async function base64ToBytes(base64) {
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
-}
-
-async function bytesToBase64(bytes) {
-    return btoa(String.fromCharCode.apply(null, bytes));
-}
-
-function uuid() {
-    return crypto.randomUUID().replace(/-/g, "");
 }
