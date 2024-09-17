@@ -66,13 +66,12 @@ Access-Control-Max-Age: 86400
 
 2. **上传脚本**：
    - 在 Cloudflare Workers 控制面板中创建一个新的 Worker。
-  
-
-
-参考项目：https://github.com/zuoban/tts
    - 将上述脚本粘贴到 Worker 编辑器中并保存。
 
 3. **绑定域名（可选）**：
    - 将 Worker 绑定到一个自定义域名或子域名，以便于访问。
 
 这样，你就可以在 Cloudflare Workers 上部署并运行这个文本转语音服务了。
+
+
+参考项目：https://github.com/zuoban/tts
