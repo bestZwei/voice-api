@@ -3,11 +3,24 @@ let expiredAt = null;
 let endpoint = null;
 let clientId = "76a75279-2ffa-4c3d-8db8-7b47252aa41c";
 
+const API_KEY = globalThis.API_KEY;  // 使用 globalThis 访问环境变量
+
 addEventListener("fetch", event => {
     event.respondWith(handleRequest(event.request));
 });
 
 async function handleRequest(request) {
+    // 验证 API Key
+    const apiKey = request.headers.get("x-api-key");
+    if (apiKey !== API_KEY) {
+        return new Response("Unauthorized", {
+            status: 401,
+            headers: {
+                "Content-Type": "text/plain"
+            }
+        });
+    }
+
     if (request.method === "OPTIONS") {
         return handleOptions(request);
     }
@@ -248,3 +261,4 @@ function dateFormat() {
     const formattedDate = (new Date()).toUTCString().replace(/GMT/, "").trim() + " GMT";
     return formattedDate.toLowerCase();
 }
+
