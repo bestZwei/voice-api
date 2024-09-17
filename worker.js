@@ -10,19 +10,20 @@ addEventListener("fetch", event => {
 });
 
 async function handleRequest(request) {
+    if (request.method === "OPTIONS") {
+        return handleOptions(request);
+    }
+    
     // 验证 API Key
     const apiKey = request.headers.get("x-api-key");
     if (apiKey !== API_KEY) {
         return new Response("Unauthorized", {
             status: 401,
             headers: {
-                "Content-Type": "text/plain"
+                "Content-Type": "text/plain",
+                ...makeCORSHeaders() // 这里也要添加CORS头
             }
         });
-    }
-
-    if (request.method === "OPTIONS") {
-        return handleOptions(request);
     }
 
     const requestUrl = new URL(request.url);
@@ -107,7 +108,7 @@ async function handleOptions(request) {
         headers: {
             ...makeCORSHeaders(),
             "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
-            "Access-Control-Allow-Headers": request.headers.get("Access-Control-Request-Headers")
+            "Access-Control-Allow-Headers": request.headers.get("Access-Control-Request-Headers") || "x-api-key"
         }
     });
 }
@@ -188,9 +189,9 @@ function addCORSHeaders(response) {
 
 function makeCORSHeaders() {
     return {
-        "Access-Control-Allow-Origin": "*", // 可以将 "*" 替换为特定的来源，例如 "https://cb3568f1.text2voice.pages.dev"
+        "Access-Control-Allow-Origin": "*", // 可以将 "*" 替换为特定的来源，例如 "https://9a17e592.text2voice.pages.dev"
         "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, x-api-key",
         "Access-Control-Max-Age": "86400" // 允许OPTIONS请求预检缓存的时间
     };
 }
@@ -261,4 +262,3 @@ function dateFormat() {
     const formattedDate = (new Date()).toUTCString().replace(/GMT/, "").trim() + " GMT";
     return formattedDate.toLowerCase();
 }
-
