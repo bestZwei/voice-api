@@ -1,0 +1,8 @@
+name = "voice-api"
+type = "javascript"
+
+account_id = "your_account_id"
+compatibility_date = "2023-12-31"
+
+[env.production]
+workers_dev = true
