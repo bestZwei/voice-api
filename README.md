@@ -66,6 +66,10 @@ Access-Control-Max-Age: 86400
 
 2. **上传脚本**：
    - 在 Cloudflare Workers 控制面板中创建一个新的 Worker。
+  
+
+
+参考项目：https://github.com/zuoban/tts
    - 将上述脚本粘贴到 Worker 编辑器中并保存。
 
 3. **绑定域名（可选）**：
